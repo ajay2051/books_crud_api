@@ -2,9 +2,8 @@
 -include .env
 export
 
-DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/booksdb?sslmode=disable
 
-.PHONY: help run build test fmt vet tidy db-up db-down migrate-install migrate-up migrate-down migrate-create docker-up docker-down
+.PHONY: help run build test fmt vet tidy db-up db-down migrate-install migrate-up migrate-down migrate-create migrate-version migrate-force docker-up docker-down
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-18s %s\n", $$1, $$2}'
@@ -37,13 +36,19 @@ migrate-install: ## Install the golang-migrate CLI
 	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
 
 migrate-up: ## Apply all pending migrations
-	migrate -path migrations -database "$(DATABASE_URL)" up
+	migrate -path migrations -database "$$DATABASE_URL" up
 
 migrate-down: ## Roll back the last migration
-	migrate -path migrations -database "$(DATABASE_URL)" down 1
+	migrate -path migrations -database "$$DATABASE_URL" down 1
 
 migrate-create: ## Create a new migration: make migrate-create name=add_isbn
 	migrate create -ext sql -dir migrations -seq $(name)
+
+migrate-version: ## Show the current migration version
+	migrate -path migrations -database "$$DATABASE_URL" version
+
+migrate-force: ## Fix a 'dirty' state: make migrate-force version=2
+	migrate -path migrations -database "$$DATABASE_URL" force $(version)
 
 # docker-up: ## Build and run API + PostgreSQL in Docker
 # 	docker compose up --build -d
