@@ -26,11 +26,11 @@ vet: ## Static checks
 tidy: ## Sync go.mod / go.sum with the code
 	go mod tidy
 
-# db-up: ## Start only PostgreSQL in Docker
-# 	docker compose up -d db
-# 
-# db-down: ## Stop PostgreSQL
-# 	docker compose stop db
+db-up: ## Start only PostgreSQL in Docker
+	docker compose up -d db
+
+db-down: ## Stop PostgreSQL
+	docker compose stop db
 
 migrate-install: ## Install the golang-migrate CLI
 	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
@@ -50,8 +50,8 @@ migrate-version: ## Show the current migration version
 migrate-force: ## Fix a 'dirty' state: make migrate-force version=2
 	migrate -path migrations -database "$$DATABASE_URL" force $(version)
 
-# docker-up: ## Build and run API + PostgreSQL in Docker
-# 	docker compose up --build -d
-# 
-# docker-down: ## Stop and remove containers (keeps data volume)
-# 	docker compose down
+docker-up: ## Build and run API + PostgreSQL in Docker
+	docker compose up --build -d
+
+docker-down: ## Stop and remove containers (keeps data volume)
+	docker compose down
