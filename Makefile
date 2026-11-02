@@ -13,6 +13,7 @@ run: ## Run the API locally
 
 build: ## Build binary into ./bin/api
 	go build -o bin/api ./cmd/api
+	## For production: CGO_ENABLE=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o bin/api ./cmd/api
 
 test: ## Run tests
 	go test ./... -cover
