@@ -1,22 +1,30 @@
-// Package handlers deals with HTTP only; read the request, call the store.
-// Write the response. No SQL here.
-
+// Package handlers deals with HTTP only: bind + validate the request, call the store,
+// write the response. No SQL here.
 package handlers
 
 import (
 	"context"
 	"errors"
-	"log"
-	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+
 	"golang_crud/models"
+	"golang_crud/utils"
+)
+
+// Success messages live in one place so they're easy to change or translate.
+const (
+	msgBookCreated  = "Book created successfully"
+	msgBooksFetched = "Books retrieved successfully"
+	msgBookFetched  = "Book retrieved successfully"
+	msgBookUpdated  = "Book updated successfully"
+	msgBookDeleted  = "Book deleted successfully"
 )
 
 // BookStore is what the handlers need from the data layer.
-// Defining  it here (an interface) lets tests plug in a fake instead of Postgres.
-
+// An interface lets tests plug in a fake instead of Postgres.
 type BookStore interface {
 	Create(ctx context.Context, b *models.Book) error
 	GetAll(ctx context.Context, limit, offset int) ([]models.Book, error)
@@ -33,45 +41,67 @@ func NewBookHandler(store BookStore) *BookHandler {
 	return &BookHandler{store: store}
 }
 
-// bookRequest is the JSON we accept from clients. Keeping it separate from
-// models.Book means clients can't set fields like id or created_at.
+// ---- request types ----------------------------------------------------
+
+// bookRequest is the JSON we accept from clients. Keeping it separate from models.Book
+// means clients can't set fields like id or created_at.
+//
+// Validation rules live in the `binding` tags (go-playground/validator syntax).
 type bookRequest struct {
-	Title  string `json:"title" binding:"required"`
-	Author string `json:"author" binding:"required"`
-	Year   int    `json:"year" binding:"gte=0,lte=9999"`
+	Title  string `json:"title" binding:"required,notblank,max=255"`
+	Author string `json:"author" binding:"required,notblank,max=255"`
+	Year   int    `json:"year" binding:"omitempty,gte=1,notfuture"`
 }
 
-func (r bookRequest) toModel() models.Book {
+// Normalize runs before validation: trim stray whitespace.
+func (r *bookRequest) Normalize() {
+	r.Title = strings.TrimSpace(r.Title)
+	r.Author = strings.TrimSpace(r.Author)
+}
+
+func (r *bookRequest) toModel() models.Book {
 	return models.Book{Title: r.Title, Author: r.Author, Year: r.Year}
 }
+
+// listQuery holds ?limit= and ?offset=; defaults apply when they are absent.
+type listQuery struct {
+	Limit  int `form:"limit,default=20" binding:"gte=1,lte=100"`
+	Offset int `form:"offset,default=0" binding:"gte=0,lte=1000000"`
+}
+
+// ---- handlers ---------------------------------------------------------
 
 // POST /api/v1/books
 func (h *BookHandler) Create(c *gin.Context) {
 	var req bookRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := utils.BindJSON(c, &req); err != nil {
+		utils.Error(c, err)
 		return
 	}
 
 	book := req.toModel()
 	if err := h.store.Create(c.Request.Context(), &book); err != nil {
-		respondError(c, err)
+		utils.Error(c, translateError(err))
 		return
 	}
-	c.JSON(http.StatusCreated, book)
+	utils.Created(c, msgBookCreated, book)
 }
 
 // GET /api/v1/books?limit=20&offset=0
 func (h *BookHandler) List(c *gin.Context) {
-	limit := queryInt(c, "limit", 20, 1, 100)
-	offset := queryInt(c, "offset", 0, 0, 1_000_000)
-
-	books, err := h.store.GetAll(c.Request.Context(), limit, offset)
-	if err != nil {
-		respondError(c, err)
+	var q listQuery
+	if err := utils.BindQuery(c, &q); err != nil {
+		utils.Error(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": books, "limit": limit, "offset": offset})
+
+	books, err := h.store.GetAll(c.Request.Context(), q.Limit, q.Offset)
+	if err != nil {
+		utils.Error(c, translateError(err))
+		return
+	}
+	utils.SuccessWithMeta(c, 200, msgBooksFetched, books,
+		gin.H{"limit": q.Limit, "offset": q.Offset, "count": len(books)})
 }
 
 // GET /api/v1/books/:id
@@ -83,10 +113,10 @@ func (h *BookHandler) Get(c *gin.Context) {
 
 	book, err := h.store.GetByID(c.Request.Context(), id)
 	if err != nil {
-		respondError(c, err)
+		utils.Error(c, translateError(err))
 		return
 	}
-	c.JSON(http.StatusOK, book)
+	utils.OK(c, msgBookFetched, book)
 }
 
 // PUT /api/v1/books/:id
@@ -97,18 +127,18 @@ func (h *BookHandler) Update(c *gin.Context) {
 	}
 
 	var req bookRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	if err := utils.BindJSON(c, &req); err != nil {
+		utils.Error(c, err)
 		return
 	}
 
 	in := req.toModel()
 	book, err := h.store.Update(c.Request.Context(), id, &in)
 	if err != nil {
-		respondError(c, err)
+		utils.Error(c, translateError(err))
 		return
 	}
-	c.JSON(http.StatusOK, book)
+	utils.OK(c, msgBookUpdated, book)
 }
 
 // DELETE /api/v1/books/:id
@@ -119,46 +149,34 @@ func (h *BookHandler) Delete(c *gin.Context) {
 	}
 
 	if err := h.store.Delete(c.Request.Context(), id); err != nil {
-		respondError(c, err)
+		utils.Error(c, translateError(err))
 		return
 	}
-	c.Status(http.StatusNoContent) // 204, no body
+	utils.OK(c, msgBookDeleted, nil)
 }
 
-// --- helpers ---------------------------------------------------------
+// ---- helpers ----------------------------------------------------------
 
-// parseID reads :id from the URL. On failure it writes a 400 and returns false.
+// parseID reads :id from the URL. On failure it writes a 422 and returns false.
 func parseID(c *gin.Context) (int64, bool) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id < 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		utils.Error(c, utils.NewValidationError([]utils.ErrorDetail{
+			{Field: "id", Message: "id must be a positive integer"},
+		}))
 		return 0, false
 	}
 	return id, true
 }
 
-// queryInt reads an integer query parameter, falling back to def and clamping to [min, max].
-func queryInt(c *gin.Context, key string, def, min, max int) int {
-	v, err := strconv.Atoi(c.Query(key))
-	if err != nil {
-		return def
+// translateError maps errors from the data layer to client-facing AppErrors.
+// Anything unrecognised is returned unchanged; utils.Error turns it into a generic 500
+// and logs the real cause.
+func translateError(err error) error {
+	switch {
+	case errors.Is(err, models.ErrNotFound):
+		return utils.NewNotFound("Book not found")
+	default:
+		return err
 	}
-	if v < min {
-		return min
-	}
-	if v > max {
-		return max
-	}
-	return v
-}
-
-// respondError maps errors to HTTP status codes in one place.
-func respondError(c *gin.Context, err error) {
-	if errors.Is(err, models.ErrNotFound) {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
-		return
-	}
-	// Log the real error for ourselves, but don't leak details to the client.
-	log.Printf("internal error: %v", err)
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
 }
