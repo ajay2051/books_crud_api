@@ -2,10 +2,10 @@ package handlers
 
 import (
 	"context"
-	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang_crud/utils"
 )
 
 // Pinger is satisfied by *sql.DB.
@@ -27,8 +27,8 @@ func (h *HealthHandler) Check(c *gin.Context) {
 	defer cancel()
 
 	if err := h.db.PingContext(ctx); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable"})
+		utils.Error(c, utils.NewServiceUnavailable("Database is unreachable", err))
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	utils.OK(c, "Service is healthy", gin.H{"status": "ok"})
 }
