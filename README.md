@@ -192,6 +192,9 @@ A migration failed halfway, and `migrate` refuses to continue until you fix it.
 2. Reset the marker to the last good version: `make migrate-force version=N-1` (for a failed migration 3, run `make migrate-force version=2`).
 3. Run `make migrate-up` again.
 
+### Generate JWT_SECRET
+openssl rand -base64 48
+
 ## Tests
 
 ```bash
