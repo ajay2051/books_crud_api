@@ -9,7 +9,15 @@ import (
 	"golang_crud/utils"
 )
 
-func New(books *handlers.BookHandler, health *handlers.HealthHandler) *gin.Engine {
+// Handlers groups everything the router needs, so New's signature stays stable as the app grows.
+type Handlers struct {
+	Books  *handlers.BookHandler
+	Health *handlers.HealthHandler
+	Auth   *handlers.AuthHandler
+}
+
+// New builds the router. authLimiter (optional, may be nil) is applied to register and login.
+func New(h Handlers, verifier middleware.TokenVerifier, authLimiter gin.HandlerFunc) *gin.Engine {
 	r := gin.New()
 	_ = r.SetTrustedProxies(nil) // don't trust X-Forwarded-For unless you configure a proxy
 	r.HandleMethodNotAllowed = true
@@ -18,7 +26,6 @@ func New(books *handlers.BookHandler, health *handlers.HealthHandler) *gin.Engin
 	// (so it also logs recovered panics), Recovery last.
 	r.Use(middleware.RequestID(), middleware.Logger(), middleware.Recovery())
 
-	// Unknown URLs / wrong methods get the same JSON envelope as every other error.
 	r.NoRoute(func(c *gin.Context) {
 		utils.Error(c, utils.NewNotFound("The requested route does not exist"))
 	})
@@ -26,16 +33,31 @@ func New(books *handlers.BookHandler, health *handlers.HealthHandler) *gin.Engin
 		utils.Error(c, utils.NewMethodNotAllowed())
 	})
 
-	r.GET("/health", health.Check)
+	// ---- public ----
+	r.GET("/health", h.Health.Check)
 
 	v1 := r.Group("/api/v1")
+
+	withLimit := func(handler gin.HandlerFunc) []gin.HandlerFunc {
+		if authLimiter == nil {
+			return []gin.HandlerFunc{handler}
+		}
+		return []gin.HandlerFunc{authLimiter, handler}
+	}
+	v1.POST("/auth/register", withLimit(h.Auth.Register)...)
+	v1.POST("/auth/login", withLimit(h.Auth.Login)...)
+
+	// ---- protected: every route below needs a valid access token ----
+	protected := v1.Group("", middleware.Auth(verifier))
 	{
-		b := v1.Group("/books")
-		b.POST("", books.Create)
-		b.GET("", books.List)
-		b.GET("/:id", books.Get)
-		b.PUT("/:id", books.Update)
-		b.DELETE("/:id", books.Delete)
+		protected.GET("/auth/me", h.Auth.Me)
+
+		books := protected.Group("/books")
+		books.POST("", h.Books.Create)
+		books.GET("", h.Books.List)
+		books.GET("/:id", h.Books.Get)
+		books.PUT("/:id", h.Books.Update)
+		books.DELETE("/:id", h.Books.Delete)
 	}
 	return r
 }
