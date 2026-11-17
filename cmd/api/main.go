@@ -3,7 +3,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,9 +13,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"golang_crud/auth"
 	"golang_crud/config"
 	"golang_crud/database"
 	"golang_crud/handlers"
+	"golang_crud/middleware"
 	"golang_crud/repository"
 	"golang_crud/routes"
 )
@@ -25,8 +30,16 @@ func main() {
 }
 
 func run() error {
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
 	gin.SetMode(cfg.GinMode)
+
+	// JSON logs in production (easy for log tools to parse), readable text in development.
+	if cfg.GinMode == gin.ReleaseMode {
+		slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	}
 
 	// 1. Database (+ migrations)
 	db, err := database.Connect(cfg.DatabaseURL)
@@ -42,11 +55,19 @@ func run() error {
 		log.Println("migrations: up to date")
 	}
 
-	// 2. Build layers from the bottom up: repository -> handlers -> router
+	// 2. Build layers from the bottom up: repositories -> auth -> handlers -> router
 	bookRepo := repository.NewBookRepository(db)
-	r := router.New(
-		handlers.NewBookHandler(bookRepo),
-		handlers.NewHealthHandler(db),
+	userRepo := repository.NewUserRepository(db)
+	tokens := auth.NewTokenManager(cfg.JWTSecret, cfg.JWTIssuer, cfg.AccessTokenTTL)
+
+	r := routes.New(
+		routes.Handlers{
+			Books:  handlers.NewBookHandler(bookRepo),
+			Health: handlers.NewHealthHandler(db),
+			Auth:   handlers.NewAuthHandler(userRepo, tokens),
+		},
+		tokens,
+		middleware.RateLimit(10, 5), // register/login: 10 requests/minute per IP, bursts of 5
 	)
 
 	// 3. HTTP server with timeouts (never use the default server in production)
