@@ -10,11 +10,14 @@ const (
 	CodeBadRequest           = "BAD_REQUEST"
 	CodeInvalidJSON          = "INVALID_JSON"
 	CodeValidation           = "VALIDATION_ERROR"
+	CodeUnauthorized         = "UNAUTHORIZED"
+	CodeTokenExpired         = "TOKEN_EXPIRED"
 	CodeNotFound             = "NOT_FOUND"
 	CodeMethodNotAllowed     = "METHOD_NOT_ALLOWED"
 	CodeConflict             = "CONFLICT"
 	CodePayloadTooLarge      = "PAYLOAD_TOO_LARGE"
 	CodeUnsupportedMediaType = "UNSUPPORTED_MEDIA_TYPE"
+	CodeTooManyRequests      = "TOO_MANY_REQUESTS"
 	CodeServiceUnavailable   = "SERVICE_UNAVAILABLE"
 	CodeInternal             = "INTERNAL_ERROR"
 )
@@ -65,6 +68,20 @@ func NewValidationError(details []ErrorDetail) *AppError {
 		Message: "Validation failed",
 		Details: details,
 	}
+}
+
+// NewUnauthorized: missing, malformed or invalid credentials / token (HTTP 401).
+func NewUnauthorized(message string) *AppError {
+	return NewAppError(http.StatusUnauthorized, CodeUnauthorized, message)
+}
+
+// NewTokenExpired lets clients tell "log in again" apart from "token is garbage".
+func NewTokenExpired() *AppError {
+	return NewAppError(http.StatusUnauthorized, CodeTokenExpired, "Access token has expired. Please log in again.")
+}
+
+func NewTooManyRequests(message string) *AppError {
+	return NewAppError(http.StatusTooManyRequests, CodeTooManyRequests, message)
 }
 
 func NewNotFound(message string) *AppError {
