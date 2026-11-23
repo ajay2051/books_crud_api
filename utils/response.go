@@ -12,6 +12,9 @@ import (
 // RequestIDKey is the gin context key set by middleware.RequestID.
 const RequestIDKey = "request_id"
 
+// UserIDKey is the gin context key set by middleware.Auth after a token is verified.
+const UserIDKey = "user_id"
+
 // Response is the single JSON shape returned by every endpoint.
 //
 //	success: {"success":true,  "message":"...", "data":{...}, "meta":{...}, "request_id":"..."}
@@ -34,6 +37,16 @@ type ErrorBody struct {
 // RequestID returns the ID of the current request ("" if the middleware isn't installed).
 func RequestID(c *gin.Context) string {
 	return c.GetString(RequestIDKey)
+}
+
+// UserID returns the authenticated user's ID (set by middleware.Auth).
+func UserID(c *gin.Context) (int64, bool) {
+	v, ok := c.Get(UserIDKey)
+	if !ok {
+		return 0, false
+	}
+	id, ok := v.(int64)
+	return id, ok
 }
 
 // Success writes a success response with any status code and a custom message.
@@ -81,6 +94,10 @@ func Error(c *gin.Context, err error) {
 			"code", appErr.Code,
 			"error", cause,
 		)
+	}
+
+	if appErr.Status == http.StatusUnauthorized {
+		c.Header("WWW-Authenticate", "Bearer") // required by RFC 6750 for 401 responses
 	}
 
 	c.AbortWithStatusJSON(appErr.Status, Response{
