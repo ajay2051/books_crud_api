@@ -3,9 +3,11 @@ package utils
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin/binding"
 	"github.com/go-playground/validator/v10"
@@ -15,7 +17,7 @@ var initOnce sync.Once
 
 // initValidator configures Gin's built-in validator (go-playground/validator) once:
 //   - error messages use the JSON field name ("title"), not the Go name ("Title")
-//   - custom rules: notblank, notfuture
+//   - custom rules: notblank, notfuture, maxbytes, strongpassword
 func initValidator() {
 	initOnce.Do(func() {
 		v, ok := binding.Validator.Engine().(*validator.Validate)
@@ -41,6 +43,29 @@ func initValidator() {
 		// notfuture: a year no later than next year.
 		_ = v.RegisterValidation("notfuture", func(fl validator.FieldLevel) bool {
 			return fl.Field().Int() <= int64(time.Now().Year()+1)
+		})
+
+		// maxbytes=N: at most N BYTES (bcrypt ignores or rejects anything past 72 bytes).
+		_ = v.RegisterValidation("maxbytes", func(fl validator.FieldLevel) bool {
+			n, err := strconv.Atoi(fl.Param())
+			if err != nil {
+				return false
+			}
+			return len(fl.Field().String()) <= n
+		})
+
+		// strongpassword: at least one letter and one digit (length is checked with min=).
+		_ = v.RegisterValidation("strongpassword", func(fl validator.FieldLevel) bool {
+			var hasLetter, hasDigit bool
+			for _, r := range fl.Field().String() {
+				switch {
+				case unicode.IsLetter(r):
+					hasLetter = true
+				case unicode.IsDigit(r):
+					hasDigit = true
+				}
+			}
+			return hasLetter && hasDigit
 		})
 	})
 }
@@ -87,6 +112,10 @@ func messageFor(fe validator.FieldError) string {
 		return fmt.Sprintf("%s must be one of: %s", f, fe.Param())
 	case "email":
 		return fmt.Sprintf("%s must be a valid email address", f)
+	case "maxbytes":
+		return fmt.Sprintf("%s must be at most %s bytes", f, fe.Param())
+	case "strongpassword":
+		return fmt.Sprintf("%s must contain at least one letter and one number", f)
 	case "notfuture":
 		return fmt.Sprintf("%s cannot be in the future", f)
 	default:
