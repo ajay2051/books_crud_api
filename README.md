@@ -400,7 +400,7 @@ go test ./test/... -cover -coverpkg=./...  # coverage of the app code
 
 All tests live in the `test/` package and use in-memory fake stores, so **no database is needed**.
 
-| File | Covers |
+| Files | Covers |
 |---|---|
 | `test/helpers_test.go` | Fakes, test router, request helpers |
 | `test/books_handlers_test.go` | Books CRUD, validation, not found |
